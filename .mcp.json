@@ -1,15 +1,33 @@
 {
-  "mcpServers": {
+  "inputs": [
+    {
+      "id": "log_path",
+      "description": "Path to log files directory",
+      "type": "promptString",
+      "default": "./Logs"
+    }
+  ],
+  "servers": {
     "log-query-server": {
+      "type": "stdio",
       "command": "dotnet",
-      "args": ["run", "--project", "MCP/LogQueryServer"],
+      "args": [
+        "run",
+        "--project",
+        "MCP/LogQueryServer"
+      ],
       "env": {
-        "LOG_PATH": "./Logs"
+        "LOG_PATH": "${input:log_path}"
       }
     },
     "metrics-server": {
-      "command": "dotnet", 
-      "args": ["run", "--project", "MCP/MetricsServer"],
+      "type": "stdio", 
+      "command": "dotnet",
+      "args": [
+        "run",
+        "--project",
+        "MCP/MetricsServer"
+      ],
       "env": {
         "ENVIRONMENT": "production"
       }
