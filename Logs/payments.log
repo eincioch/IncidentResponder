@@ -1,0 +1,13 @@
+2024-01-15 10:23:15.123 [INFO] PaymentsProcessor: Starting payment processing batch
+2024-01-15 10:23:16.456 [INFO] PaymentsProcessor: Processing payment ID: PMT-12345, Amount: $299.99
+2024-01-15 10:23:17.789 [ERROR] PaymentsProcessor.cs:42: NullReferenceException - Object reference not set to an instance of an object. Stack trace: ProcessPayment() -> ValidatePaymentData()
+2024-01-15 10:23:18.012 [WARN] PaymentsProcessor: Retrying payment processing for ID: PMT-12345
+2024-01-15 10:23:19.345 [INFO] PaymentsProcessor: Successfully processed payment ID: PMT-12346, Amount: $156.78
+2024-01-15 10:23:20.678 [INFO] PaymentsProcessor: Processing payment ID: PMT-12347, Amount: $89.99
+2024-01-15 10:23:21.901 [ERROR] PaymentsProcessor.cs:67: ArgumentNullException in CalculateTransactionFee() - Parameter 'paymentDetails' cannot be null
+2024-01-15 10:23:22.234 [INFO] PaymentsProcessor: Payment batch processing completed. Total processed: 2, Failed: 2
+2024-01-15 10:23:23.567 [INFO] PaymentsProcessor: Memory usage: 245MB, CPU: 15%
+2024-01-15 10:23:24.890 [WARN] PaymentsProcessor: High failure rate detected: 50% in last batch
+2024-01-15 10:23:25.123 [INFO] PaymentsProcessor: Initiating payment retry queue processing
+2024-01-15 10:23:26.456 [ERROR] PaymentsProcessor.cs:89: InvalidOperationException - Payment gateway connection timeout after 30 seconds
+2024-01-15 10:23:27.789 [INFO] PaymentsProcessor: Payment processing service shutting down gracefully
