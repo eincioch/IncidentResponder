@@ -1,11 +1,11 @@
-using McpServer;
+using ModelContextProtocol;
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
 
 // MCP Log Query Server - helps GitHub Copilot Agent analyze production logs
 // This server exposes log querying capabilities to assist in incident response
 
-var builder = McpServerBuilder.CreateBuilder(args);
+var builder = ModelContextProtocol.McpServerBuilder.CreateBuilder(args);
 
 // Configure logging for the MCP server itself
 builder.Services.AddLogging(logging =>
@@ -50,8 +50,9 @@ app.AddTool("query_logs", "Search through service logs for specific terms or pat
         var service = arguments["service"]?.ToString() ?? "";
         var searchTerm = arguments["search_term"]?.ToString() ?? "";
         var maxLines = 20;
-        
-        if (arguments.ContainsKey("lines") && int.TryParse(arguments["lines"]?.ToString(), out int parsedLines))
+        int parsedLines = 0;
+
+        if (arguments.ContainsKey("lines") && int.TryParse(arguments["lines"]?.ToString(), out parsedLines))
         {
             maxLines = Math.Min(Math.Max(parsedLines, 1), 100);
         }
@@ -65,7 +66,7 @@ app.AddTool("query_logs", "Search through service logs for specific terms or pat
         };
 
         var logPath = Path.Combine(Environment.GetEnvironmentVariable("LOG_PATH") ?? "../../Logs", logFile);
-        
+
         if (!File.Exists(logPath))
         {
             return JsonSerializer.Serialize(new
@@ -141,7 +142,7 @@ app.AddTool("get_recent_logs", "Get the most recent log entries for a service", 
     {
         var service = arguments["service"]?.ToString() ?? "";
         var count = 10;
-        
+
         if (arguments.ContainsKey("count") && int.TryParse(arguments["count"]?.ToString(), out int parsedCount))
         {
             count = Math.Min(Math.Max(parsedCount, 1), 50);
@@ -155,7 +156,7 @@ app.AddTool("get_recent_logs", "Get the most recent log entries for a service", 
         };
 
         var logPath = Path.Combine(Environment.GetEnvironmentVariable("LOG_PATH") ?? "../../Logs", logFile);
-        
+
         if (!File.Exists(logPath))
         {
             return JsonSerializer.Serialize(new

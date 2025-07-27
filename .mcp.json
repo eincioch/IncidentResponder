@@ -1,27 +1,36 @@
 {
-  "mcpServers": {
+  "inputs": [
+    {
+      "id": "log_path",
+      "description": "Path to log files directory",
+      "type": "promptString",
+      "default": "./Logs"
+    }
+  ],
+  "servers": {
     "log-query-server": {
+      "type": "stdio",
       "command": "dotnet",
-      "args": ["run", "--project", "MCP/LogQueryServer"],
+      "args": [
+        "run",
+        "--project",
+        "MCP/LogQueryServer"
+      ],
       "env": {
-        "LOG_PATH": "./Logs"
-      },
-      "stdin": true,
-      "stderr": true
+        "LOG_PATH": "${input:log_path}"
+      }
     },
     "metrics-server": {
+      "type": "stdio",
       "command": "dotnet",
-      "args": ["run", "--project", "MCP/MetricsServer"],
+      "args": [
+        "run",
+        "--project",
+        "MCP/MetricsServer"
+      ],
       "env": {
         "ENVIRONMENT": "production"
-      },
-      "stdin": true,
-      "stderr": true
+      }
     }
-  },
-  "inputs": {
-    "services": ["PaymentsService", "OrdersService"],
-    "logPaths": ["./Logs/payments.log", "./Logs/orders.log"],
-    "searchTerms": ["error", "exception", "warning", "critical"]
   }
 }
