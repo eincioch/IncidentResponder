@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace PaymentsService;
@@ -15,79 +16,139 @@ public class PaymentDetails
 
 public class PaymentsProcessor
 {
-    private readonly IPaymentGateway? _paymentGateway;
-    private readonly Dictionary<string, decimal> _transactionFees = new();
+    private readonly IPaymentGateway _paymentGateway;
+    private readonly Dictionary<string, decimal> _transactionFees;
 
-    public PaymentsProcessor(IPaymentGateway? paymentGateway = null)
-    {
-        _paymentGateway = paymentGateway;
-        InitializeTransactionFees();
-    }
+    // Retry/timeout policy settings
+    private const int MaxGatewayRetries = 3;
+    private static readonly TimeSpan GatewayTimeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan BaseRetryDelay = TimeSpan.FromMilliseconds(250);
 
-    private void InitializeTransactionFees()
+    public PaymentsProcessor(IPaymentGateway paymentGateway)
     {
-        _transactionFees.Add("USD", 0.029m);
-        _transactionFees.Add("EUR", 0.035m);
-        _transactionFees.Add("GBP", 0.032m);
+        _paymentGateway = paymentGateway ?? throw new ArgumentNullException(nameof(paymentGateway));
+        _transactionFees = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase)
+        {
+            { "USD", 0.029m },
+            { "EUR", 0.035m },
+            { "GBP", 0.032m }
+        };
     }
 
     /// <summary>
-    /// BUG: This method has a deliberate NullReferenceException that GitHub Copilot Agent can help identify
-    /// The bug occurs when paymentDetails.Currency is null and we try to access the dictionary
-    /// MCP servers can provide log context to help debug this issue
+    /// Process a payment with defensive validation, safe fee calculation, and resilient gateway calls.
     /// </summary>
     public async Task<bool> ProcessPayment(PaymentDetails paymentDetails)
     {
         try
         {
-            // DELIBERATE BUG: No null check for paymentDetails
             ValidatePaymentData(paymentDetails);
-            
+
             var transactionFee = CalculateTransactionFee(paymentDetails);
             var totalAmount = paymentDetails.Amount + transactionFee;
 
-            // DELIBERATE BUG: _paymentGateway could be null
-            var result = await _paymentGateway!.ProcessAsync(paymentDetails.PaymentId!, totalAmount);
-            
-            return result.IsSuccess;
+            // Retry with exponential backoff and timeout to reduce transient failures/timeouts
+            for (int attempt = 1; attempt <= MaxGatewayRetries; attempt++)
+            {
+                try
+                {
+                    var result = await _paymentGateway
+                        .ProcessAsync(paymentDetails.PaymentId!, totalAmount)
+                        .WaitAsync(GatewayTimeout)
+                        .ConfigureAwait(false);
+
+                    return result.IsSuccess;
+                }
+                catch (Exception ex) when (IsTransient(ex))
+                {
+                    if (attempt == MaxGatewayRetries)
+                    {
+                        Console.WriteLine($"[ERROR] Payment gateway call failed after {attempt} attempts: {ex.Message}");
+                        break;
+                    }
+
+                    var delay = TimeSpan.FromMilliseconds(BaseRetryDelay.TotalMilliseconds * Math.Pow(2, attempt - 1));
+                    Console.WriteLine($"[WARN] Transient gateway error (attempt {attempt}/{MaxGatewayRetries}): {ex.Message}. Retrying in {delay.TotalMilliseconds}ms...");
+                    await Task.Delay(delay).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    // Non-transient error
+                    Console.WriteLine($"[ERROR] Non-transient error calling payment gateway: {ex}");
+                    return false;
+                }
+            }
+
+            return false;
         }
         catch (Exception ex)
         {
-            // Log the error - this is where MCP log query server can help
-            Console.WriteLine($"ERROR in PaymentsProcessor.cs: {ex.Message}");
-            throw;
+            // Log and fail gracefully to reduce unhandled exceptions and error rates
+            Console.WriteLine($"[ERROR] PaymentsProcessor.ProcessPayment failed: {ex}");
+            return false;
         }
     }
 
-    /// <summary>
-    /// POTENTIAL BUG: This method doesn't handle null paymentDetails properly
-    /// GitHub Copilot Agent can suggest defensive programming patterns here
-    /// </summary>
-    private void ValidatePaymentData(PaymentDetails paymentDetails)
+    private static bool IsTransient(Exception ex)
     {
-        // DELIBERATE BUG: Direct property access without null check
-        if (string.IsNullOrEmpty(paymentDetails.PaymentId))
-            throw new ArgumentException("PaymentId cannot be null or empty");
+        // Consider timeouts and common transient gateway exceptions as retryable
+        if (ex is TimeoutException)
+            return true;
 
-        if (paymentDetails.Amount <= 0)
-            throw new ArgumentException("Amount must be greater than zero");
+        if (ex is InvalidOperationException ioe && ioe.Message.Contains("timeout", StringComparison.OrdinalIgnoreCase))
+            return true;
 
-        // DELIBERATE BUG: Currency could be null, causing NullReferenceException in CalculateTransactionFee
-        if (string.IsNullOrEmpty(paymentDetails.Currency))
-            throw new ArgumentException("Currency cannot be null or empty");
+        // TaskCanceledException may bubble from WaitAsync
+        if (ex is TaskCanceledException)
+            return true;
+
+        return false;
     }
 
     /// <summary>
-    /// BUG: This method assumes paymentDetails and Currency are never null
-    /// MCP metrics server can show error rates to highlight this problematic method
+    /// Validate incoming payment data with full null checks and normalization.
+    /// </summary>
+    private static void ValidatePaymentData(PaymentDetails? paymentDetails)
+    {
+        if (paymentDetails is null)
+            throw new ArgumentNullException(nameof(paymentDetails));
+
+        if (string.IsNullOrWhiteSpace(paymentDetails.PaymentId))
+            throw new ArgumentException("PaymentId cannot be null or empty", nameof(paymentDetails));
+
+        if (paymentDetails.Amount <= 0)
+            throw new ArgumentException("Amount must be greater than zero", nameof(paymentDetails));
+
+        if (string.IsNullOrWhiteSpace(paymentDetails.Currency))
+            throw new ArgumentException("Currency cannot be null or empty", nameof(paymentDetails));
+
+        // Normalize currency for consistent lookups
+        paymentDetails.Currency = paymentDetails.Currency.Trim().ToUpperInvariant();
+
+        if (string.IsNullOrWhiteSpace(paymentDetails.CustomerId))
+            throw new ArgumentException("CustomerId cannot be null or empty", nameof(paymentDetails));
+    }
+
+    /// <summary>
+    /// Safe fee calculation that tolerates unknown currencies.
     /// </summary>
     private decimal CalculateTransactionFee(PaymentDetails paymentDetails)
     {
-        // DELIBERATE BUG: No null check for paymentDetails parameter
-        // DELIBERATE BUG: Dictionary access without ContainsKey check
-        var feeRate = _transactionFees[paymentDetails.Currency!]; // Could throw KeyNotFoundException
-        
-        return paymentDetails.Amount * feeRate;
+        if (paymentDetails is null)
+            throw new ArgumentNullException(nameof(paymentDetails));
+
+        var currency = paymentDetails.Currency?.Trim().ToUpperInvariant();
+
+        // Default to a conservative fee if currency is unknown to avoid KeyNotFoundException
+        const decimal defaultFeeRate = 0.03m;
+        var feeRate = defaultFeeRate;
+
+        if (!string.IsNullOrEmpty(currency) && _transactionFees.TryGetValue(currency, out var knownRate))
+        {
+            feeRate = knownRate;
+        }
+
+        return Math.Round(paymentDetails.Amount * feeRate, 2, MidpointRounding.AwayFromZero);
     }
 
     public async Task<List<PaymentDetails>> GetFailedPayments()
@@ -95,8 +156,8 @@ public class PaymentsProcessor
         // Simulate some failed payments for demo purposes
         return new List<PaymentDetails>
         {
-            new() { PaymentId = "PMT-12345", Amount = 299.99m, Currency = null, CustomerId = "CUST-001", CreatedAt = DateTime.Now.AddMinutes(-30) },
-            new() { PaymentId = "PMT-12347", Amount = 89.99m, Currency = "USD", CustomerId = null, CreatedAt = DateTime.Now.AddMinutes(-20) }
+            new() { PaymentId = "PMT-12345", Amount = 299.99m, Currency = "USD", CustomerId = "CUST-001", CreatedAt = DateTime.Now.AddMinutes(-30) },
+            new() { PaymentId = "PMT-12347", Amount = 89.99m, Currency = "USD", CustomerId = "CUST-002", CreatedAt = DateTime.Now.AddMinutes(-20) }
         };
     }
 }

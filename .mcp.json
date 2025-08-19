@@ -31,6 +31,10 @@
       "env": {
         "ENVIRONMENT": "production"
       }
+    },
+    "github": {
+      "type": "http",
+      "url": "https://api.githubcopilot.com/mcp",
     }
   }
 }
